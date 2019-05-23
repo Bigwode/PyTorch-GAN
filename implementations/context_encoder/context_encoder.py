@@ -1,31 +1,12 @@
-"""
-Inpainting using Generative Adversarial Networks.
-The dataset can be downloaded from: https://www.dropbox.com/sh/8oqt9vytwxb3s4r/AADIKlz8PR9zr6Y20qbkunrba/Img/img_align_celeba.zip?dl=0
-(if not available there see if options are listed at http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
-Instrustion on running the script:
-1. Download the dataset from the provided link
-2. Save the folder 'img_align_celeba' to '../../data/'
-4. Run the sript using command 'python3 context_encoder.py'
-"""
-
 import argparse
-import os
-import numpy as np
-import math
-
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
 from PIL import Image
 
 from torch.utils.data import DataLoader
-from torchvision import datasets
-from torch.autograd import Variable
 
 from datasets import *
 from models import *
-
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
 
 os.makedirs("images", exist_ok=True)
@@ -87,13 +68,13 @@ transforms_ = [
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ]
 dataloader = DataLoader(
-    ImageDataset("../../data/%s" % opt.dataset_name, transforms_=transforms_),
+    ImageDataset("./img_align_celeba", transforms_=transforms_),
     batch_size=opt.batch_size,
     shuffle=True,
     num_workers=opt.n_cpu,
 )
 test_dataloader = DataLoader(
-    ImageDataset("../../data/%s" % opt.dataset_name, transforms_=transforms_, mode="val"),
+    ImageDataset("./img_align_celeba", transforms_=transforms_, mode="val"),
     batch_size=12,
     shuffle=True,
     num_workers=1,
@@ -108,8 +89,8 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 def save_sample(batches_done):
     samples, masked_samples, i = next(iter(test_dataloader))
-    samples = Variable(samples.type(Tensor))
-    masked_samples = Variable(masked_samples.type(Tensor))
+    samples = samples.type(Tensor)
+    masked_samples = masked_samples.type(Tensor)
     i = i[0].item()  # Upper-left coordinate of mask
     # Generate inpainted image
     gen_mask = generator(masked_samples)
@@ -128,13 +109,13 @@ for epoch in range(opt.n_epochs):
     for i, (imgs, masked_imgs, masked_parts) in enumerate(dataloader):
 
         # Adversarial ground truths
-        valid = Variable(Tensor(imgs.shape[0], *patch).fill_(1.0), requires_grad=False)
-        fake = Variable(Tensor(imgs.shape[0], *patch).fill_(0.0), requires_grad=False)
+        valid = torch.ones(imgs.shape[0], *patch).cuda()  # (8,1,8,8)
+        fake = torch.zeros(imgs.shape[0], *patch).cuda()  # (8,1,8,8)
 
         # Configure input
-        imgs = Variable(imgs.type(Tensor))
-        masked_imgs = Variable(masked_imgs.type(Tensor))
-        masked_parts = Variable(masked_parts.type(Tensor))
+        imgs = imgs.type(Tensor)  # (8,3,128,128)
+        masked_imgs = masked_imgs.type(Tensor)  # (8,3,128,128)
+        masked_parts = masked_parts.type(Tensor)  # (8,3,64,64)
 
         # -----------------
         #  Train Generator
@@ -143,10 +124,10 @@ for epoch in range(opt.n_epochs):
         optimizer_G.zero_grad()
 
         # Generate a batch of images
-        gen_parts = generator(masked_imgs)
+        gen_parts = generator(masked_imgs)  # (8,3,64,64)
 
         # Adversarial and pixelwise loss
-        g_adv = adversarial_loss(discriminator(gen_parts), valid)
+        g_adv = adversarial_loss(discriminator(gen_parts), valid)  # (8,1,8,8)
         g_pixel = pixelwise_loss(gen_parts, masked_parts)
         # Total loss
         g_loss = 0.001 * g_adv + 0.999 * g_pixel
@@ -162,7 +143,7 @@ for epoch in range(opt.n_epochs):
 
         # Measure discriminator's ability to classify real from generated samples
         real_loss = adversarial_loss(discriminator(masked_parts), valid)
-        fake_loss = adversarial_loss(discriminator(gen_parts.detach()), fake)
+        fake_loss = adversarial_loss(discriminator(gen_parts.detach()), fake)  # 截断G梯度流
         d_loss = 0.5 * (real_loss + fake_loss)
 
         d_loss.backward()
